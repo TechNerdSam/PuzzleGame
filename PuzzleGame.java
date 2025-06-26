@@ -1,453 +1,694 @@
+import javax.imageio.ImageIO;
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
-import javax.imageio.ImageIO;
 import java.io.*;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Random;
 
+/**
+ * PuzzleGame --- A high-end, professional sliding puzzle game.
+ * This class serves as the main frame and controller for the entire application.
+ * It manages the different panels (MainMenu, Puzzle, HighScores) using a CardLayout.
+ * <p>
+ * Jeu de Puzzle --- Un jeu de taquin professionnel et haut de gamme.
+ * Cette classe sert de fenêtre principale et de contrôleur pour l'application.
+ * Elle gère les différents panneaux (Menu Principal, Jeu, Meilleurs Scores) via un CardLayout.
+ */
 public class PuzzleGame extends JFrame {
 
+    // --- CONSTANTS ---
+
+    /**
+     * The file name for storing high scores.
+     * Le nom du fichier pour stocker les meilleurs scores.
+     */
     private static final String HIGHSCORE_FILE = "highscores.txt";
-    private static final int MAX_LEVEL = 20;
 
-    private JPanel mainPanel;
-    private CardLayout cardLayout;
+    /**
+     * Default player name if none is entered.
+     * Nom du joueur par défaut si aucun n'est saisi.
+     */
+    private static final String DEFAULT_PLAYER_NAME = "Guest";
 
-    private PuzzlePanel puzzlePanel;
-    private HighScorePanel highScorePanel;
-    private MainMenuPanel mainMenuPanel;
+    // --- THEME & STYLING ---
+    // Centralized theme colors and fonts for easy customization.
+    // Couleurs et polices du thème centralisées pour une personnalisation facile.
 
-    private String currentPlayerName = "Guest";
-    private int currentScore = 0;
-    private int currentLevel = 1;
+    private static final Color COLOR_BACKGROUND = new Color(45, 52, 54);
+    private static final Color COLOR_FOREGROUND = Color.WHITE;
+    private static final Color COLOR_ACCENT = new Color(99, 110, 114);
+    private static final Font FONT_TITLE = new Font("Serif", Font.BOLD, 60);
+    private static final Font FONT_BUTTON = new Font("SansSerif", Font.BOLD, 22);
+    private static final Font FONT_LABEL = new Font("SansSerif", Font.BOLD, 18);
 
-    // Image principale du puzzle
-    private BufferedImage originalImage; // Cette image sera chargée APRES le démarrage, via le menu
-    private List<BufferedImage> tileImages; // Liste des sous-images pour les tuiles
+    // --- UI COMPONENTS ---
+    // Main panels managed by CardLayout.
+    // Panneaux principaux gérés par le CardLayout.
 
+    private final CardLayout cardLayout = new CardLayout();
+    private final JPanel mainPanel = new JPanel(cardLayout);
+    private final MainMenuPanel mainMenuPanel;
+    private final PuzzlePanel puzzlePanel;
+    private final HighScorePanel highScorePanel;
+
+    // --- GAME STATE ---
+    // Fields representing the current state of the game.
+    // Champs représentant l'état actuel du jeu.
+
+    private String currentPlayerName = DEFAULT_PLAYER_NAME;
+    private BufferedImage originalImage;
+
+    /**
+     * Constructor for PuzzleGame.
+     * Initializes the main frame and all its sub-panels.
+     * <p>
+     * Constructeur de PuzzleGame.
+     * Initialise la fenêtre principale et tous ses sous-panneaux.
+     */
     public PuzzleGame() {
-        setTitle("Jeu de Puzzle Simplifié");
-        setSize(800, 600);
+        // --- FRAME INITIALIZATION ---
+        setTitle("Puzzle Prestige");
+        setSize(1200, 800);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setLocationRelativeTo(null); // Centrer la fenêtre
+        setLocationRelativeTo(null); // Center the window / Centrer la fenêtre
 
-        cardLayout = new CardLayout();
-        mainPanel = new JPanel(cardLayout);
-
+        // --- PANEL CREATION ---
         mainMenuPanel = new MainMenuPanel();
         puzzlePanel = new PuzzlePanel();
         highScorePanel = new HighScorePanel();
 
+        // --- LAYOUT SETUP ---
         mainPanel.add(mainMenuPanel, "MainMenu");
         mainPanel.add(puzzlePanel, "PuzzleGame");
         mainPanel.add(highScorePanel, "HighScores");
-
         add(mainPanel);
+
+        // --- INITIAL DISPLAY ---
         showMainMenu();
     }
 
-    // Méthode pour découper l'image en tuiles
-    private List<BufferedImage> createTileImages(BufferedImage sourceImage, int gridSize) {
-        List<BufferedImage> images = new ArrayList<>();
-        int tileWidth = sourceImage.getWidth() / gridSize;
-        int tileHeight = sourceImage.getHeight() / gridSize;
+    // --- NAVIGATION METHODS ---
 
-        for (int i = 0; i < gridSize; i++) {
-            for (int j = 0; j < gridSize; j++) {
-                // Pour la dernière tuile (qui sera vide), nous n'ajoutons pas d'image
-                if (!(i == gridSize - 1 && j == gridSize - 1)) {
-                    images.add(sourceImage.getSubimage(j * tileWidth, i * tileHeight, tileWidth, tileHeight));
-                }
-            }
-        }
-        return images;
-    }
-
-    public void showMainMenu() {
+    /**
+     * Displays the main menu panel.
+     * Affiche le panneau du menu principal.
+     */
+    private void showMainMenu() {
+        mainMenuPanel.updateGreeting(currentPlayerName);
         cardLayout.show(mainPanel, "MainMenu");
     }
 
-    public void startGame() {
-        // Demander à l'utilisateur de choisir une image avant de démarrer le jeu
+    /**
+     * Initiates the process of starting a new game by first asking the user to select an image.
+     * Lance le processus de démarrage d'une nouvelle partie en demandant d'abord à l'utilisateur de sélectionner une image.
+     */
+    private void prepareGame() {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Sélectionnez l'image du puzzle");
-        int userSelection = fileChooser.showOpenDialog(this);
+        fileChooser.setDialogTitle("Sélectionnez une image pour le puzzle");
+        fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Images", "jpg", "png"));
 
-        if (userSelection == JFileChooser.APPROVE_OPTION) {
-            File selectedFile = fileChooser.getSelectedFile();
+        if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             try {
-                BufferedImage chosenImage = ImageIO.read(selectedFile);
-                if (chosenImage == null) {
-                    throw new IOException("Le fichier sélectionné n'est pas une image valide.");
+                // Read the selected image file.
+                // Lire le fichier image sélectionné.
+                File selectedFile = fileChooser.getSelectedFile();
+                originalImage = ImageIO.read(selectedFile);
+
+                // Ensure the file is a valid image.
+                // S'assurer que le fichier est une image valide.
+                if (originalImage == null) {
+                    throw new IOException("Le fichier sélectionné n'est pas une image valide ou ne peut pas être lu.");
                 }
 
-                // Redimensionner l'image choisie
-                int maxGridSize = 5; // Correspond à la grille 5x5 pour level 3+
-                int preferredSize = Math.min(chosenImage.getWidth(), chosenImage.getHeight());
-                if (preferredSize > 500) preferredSize = 500; // Limite la taille pour l'affichage
-                if (preferredSize < 300) preferredSize = 300; // Taille minimale pour la visibilité
+                // Ask for player's name.
+                // Demander le nom du joueur.
+                promptForPlayerName();
 
-                BufferedImage resizedImage = new BufferedImage(preferredSize, preferredSize, BufferedImage.TYPE_INT_ARGB);
-                Graphics2D g2d = resizedImage.createGraphics();
-                g2d.drawImage(chosenImage, 0, 0, preferredSize, preferredSize, null);
-                g2d.dispose();
-                this.originalImage = resizedImage; // Mettre à jour l'image principale
-
-                // Créer les tuiles à partir de l'image redimensionnée
-                this.tileImages = createTileImages(this.originalImage, maxGridSize);
-
-                // Maintenant que l'image est chargée, procéder au démarrage du jeu
-                String name = JOptionPane.showInputDialog(this, "Entrez votre pseudo:", "Pseudo", JOptionPane.PLAIN_MESSAGE);
-                if (name != null && !name.trim().isEmpty()) {
-                    currentPlayerName = name.trim();
-                } else {
-                    currentPlayerName = "Guest";
-                }
-                currentScore = 0;
-                currentLevel = 1;
-                puzzlePanel.startGame(currentLevel);
-                cardLayout.show(mainPanel, "PuzzleGame");
+                // Proceed to difficulty selection.
+                // Passer à la sélection de la difficulté.
+                chooseDifficulty();
 
             } catch (IOException e) {
+                // Display a user-friendly error message if image loading fails.
+                // Afficher un message d'erreur clair si le chargement de l'image échoue.
                 JOptionPane.showMessageDialog(this,
-                        "Erreur lors du chargement de l'image: " + e.getMessage() + "\n" +
-                        "Veuillez sélectionner un fichier image valide (JPG, PNG, GIF, etc.).",
-                        "Erreur de chargement d'image", JOptionPane.ERROR_MESSAGE);
-                e.printStackTrace();
+                        "Erreur de chargement d'image: " + e.getMessage(),
+                        "Erreur de Fichier",
+                        JOptionPane.ERROR_MESSAGE);
             }
-        } else {
-            // L'utilisateur a annulé la sélection de fichier
-            JOptionPane.showMessageDialog(this, "Aucune image sélectionnée. Retour au menu principal.", "Annulé", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 
-    public void showHighScores() {
-        highScorePanel.loadHighScores();
-        cardLayout.show(mainPanel, "HighScores");
-    }
-
-    public void exitGame() {
-        saveHighScore(currentPlayerName, currentScore); // Sauvegarde le score au moment de quitter
-        System.exit(0);
-    }
-
-    public void levelCompleted() {
-        currentScore += 100 * currentLevel; // Augmenter le score à chaque niveau complété
-        currentLevel++;
-        if (currentLevel > MAX_LEVEL) {
-            currentLevel = 1; // Retour au niveau 1 après le niveau 20
-            JOptionPane.showMessageDialog(this, "Félicitations ! Vous avez terminé le cycle de niveaux. Le jeu redémarre au niveau 1 avec votre score actuel.", "Niveau Max Atteint", JOptionPane.INFORMATION_MESSAGE);
+    /**
+     * Prompts the user to enter their name.
+     * Demande à l'utilisateur de saisir son nom.
+     */
+    private void promptForPlayerName() {
+        String name = JOptionPane.showInputDialog(this, "Entrez votre pseudo:", currentPlayerName);
+        if (name != null && !name.trim().isEmpty()) {
+            // Sanitize the input by trimming whitespace.
+            // Nettoyer l'entrée en supprimant les espaces.
+            this.currentPlayerName = name.trim();
         } else {
-            JOptionPane.showMessageDialog(this, "Niveau " + (currentLevel - 1) + " terminé ! Score actuel : " + currentScore, "Niveau Terminé", JOptionPane.INFORMATION_MESSAGE);
+            this.currentPlayerName = DEFAULT_PLAYER_NAME;
         }
-        puzzlePanel.startGame(currentLevel); // Démarrer le nouveau niveau
     }
 
-    public void gameOver() {
-        JOptionPane.showMessageDialog(this, "Partie terminée ! Votre score : " + currentScore, "Game Over", JOptionPane.INFORMATION_MESSAGE);
-        saveHighScore(currentPlayerName, currentScore);
-        showMainMenu();
+    /**
+     * Displays a dialog to let the user choose the puzzle's grid size (difficulty).
+     * Affiche une boîte de dialogue pour que l'utilisateur choisisse la taille de la grille (difficulté).
+     */
+    private void chooseDifficulty() {
+        Object[] options = {"Facile (3x3)", "Moyen (4x4)", "Difficile (5x5)"};
+        int choice = JOptionPane.showOptionDialog(this,
+                "Choisissez la difficulté",
+                "Difficulté",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null, options, options[1]);
+
+        int gridSize = 4; // Default to medium / Par défaut sur moyen
+        if (choice == 0) {
+            gridSize = 3; // Easy / Facile
+        } else if (choice == 2) {
+            gridSize = 5; // Hard / Difficile
+        }
+
+        startGame(gridSize);
     }
 
-    private void saveHighScore(String name, int score) {
+    /**
+     * Starts the puzzle game with the selected grid size.
+     * Démarre le jeu de puzzle avec la taille de grille sélectionnée.
+     *
+     * @param gridSize The dimension of the puzzle grid (e.g., 3 for a 3x3 grid).
+     * La dimension de la grille du puzzle (ex: 3 pour une grille 3x3).
+     */
+    private void startGame(int gridSize) {
+        puzzlePanel.startGame(gridSize, originalImage);
+        cardLayout.show(mainPanel, "PuzzleGame");
+    }
+
+    /**
+     * Saves the player's score to the high score file.
+     * This method is synchronized to prevent concurrent file access issues, though unlikely in a single-threaded Swing app.
+     * <p>
+     * Enregistre le score du joueur dans le fichier des meilleurs scores.
+     * Cette méthode est synchronisée pour éviter les problèmes d'accès concurrents, bien que peu probables dans une application Swing.
+     *
+     * @param name  The player's name. / Le nom du joueur.
+     * @param score The player's final score. / Le score final du joueur.
+     */
+    private synchronized void saveHighScore(String name, int score) {
+        // Do not save zero scores. / Ne pas enregistrer les scores de zéro.
+        if (score <= 0) return;
+
+        // Use try-with-resources for automatic resource management (safer file handling).
+        // Utiliser try-with-resources pour la gestion automatique des ressources (gestion de fichiers plus sûre).
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(HIGHSCORE_FILE, true))) {
             writer.write(name + "," + score);
             writer.newLine();
         } catch (IOException e) {
-            e.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Erreur lors de l'enregistrement du score: " + e.getMessage(), "Erreur", JOptionPane.ERROR_MESSAGE);
+            // Log the error and inform the user if saving fails.
+            // Enregistrer l'erreur et informer l'utilisateur si la sauvegarde échoue.
+            System.err.println("Error saving high score: " + e.getMessage());
+            JOptionPane.showMessageDialog(this,
+                    "Impossible d'enregistrer le score.",
+                    "Erreur Fichier",
+                    JOptionPane.ERROR_MESSAGE);
         }
     }
 
-    // --- Panneaux du Jeu ---
+    // --- INNER CLASSES (PANELS) ---
+    // Each panel is an inner class, tightly coupled with the main PuzzleGame frame.
+    // Chaque panneau est une classe interne, étroitement liée à la fenêtre principale PuzzleGame.
 
-    class MainMenuPanel extends JPanel {
+    /**
+     * MainMenuPanel --- The first screen the user sees.
+     * Provides navigation to start a game, view high scores, or exit.
+     * <p>
+     * MainMenuPanel --- Le premier écran que l'utilisateur voit.
+     * Offre la navigation pour démarrer une partie, voir les scores, ou quitter.
+     */
+    private class MainMenuPanel extends JPanel {
+        private JLabel greetingLabel;
+        private Timer animationTimer;
+        
+        private float hue = 0.55f;
+        private Color gradientStartColor = COLOR_BACKGROUND;
+        private Color gradientEndColor = COLOR_ACCENT;
+        
+        private JButton newGameButton;
+        private JButton highScoresButton;
+        private JButton quitButton;
+
+
         public MainMenuPanel() {
-            setLayout(new GridBagLayout());
+            this.setLayout(new GridBagLayout());
+
+            animationTimer = new Timer(40, e -> {
+                hue += 0.001f;
+                if (hue > 1.0f) {
+                    hue = 0.0f;
+                }
+                gradientStartColor = Color.getHSBColor(hue, 0.5f, 0.3f);
+                gradientEndColor = Color.getHSBColor(hue + 0.1f, 0.5f, 0.2f);
+                
+                Color titleColor = Color.getHSBColor((hue + 0.5f) % 1.0f, 0.4f, 1.0f);
+                Color buttonBgColor = Color.getHSBColor(hue, 0.4f, 0.4f);
+                Color buttonFgColor = Color.getHSBColor(hue, 0.1f, 0.95f);
+
+                greetingLabel.setForeground(titleColor);
+                newGameButton.setBackground(buttonBgColor);
+                newGameButton.setForeground(buttonFgColor);
+                highScoresButton.setBackground(buttonBgColor);
+                highScoresButton.setForeground(buttonFgColor);
+                quitButton.setBackground(buttonBgColor);
+                quitButton.setForeground(buttonFgColor);
+                
+                repaint(); 
+            });
+            
+
             GridBagConstraints gbc = new GridBagConstraints();
-            gbc.insets = new Insets(10, 10, 10, 10);
             gbc.gridx = 0;
             gbc.gridy = 0;
+            gbc.insets = new Insets(20, 20, 20, 20);
 
-            JLabel titleLabel = new JLabel("Jeu de Puzzle");
-            titleLabel.setFont(new Font("Arial", Font.BOLD, 36));
-            add(titleLabel, gbc);
-
-            gbc.gridy++;
-            JButton startButton = new JButton("Nouvelle Partie");
-            startButton.setFont(new Font("Arial", Font.PLAIN, 20));
-            startButton.addActionListener(e -> startGame()); // Cette action appellera JFileChooser
-            add(startButton, gbc);
+            greetingLabel = new JLabel("Bienvenue", SwingConstants.CENTER);
+            greetingLabel.setFont(FONT_TITLE);
+            greetingLabel.setForeground(COLOR_FOREGROUND);
+            add(greetingLabel, gbc);
 
             gbc.gridy++;
-            JButton highScoresButton = new JButton("Meilleurs Scores");
-            highScoresButton.setFont(new Font("Arial", Font.PLAIN, 20));
-            highScoresButton.addActionListener(e -> showHighScores());
-            add(highScoresButton, gbc);
+            JPanel buttonPanel = new JPanel(new GridLayout(1, 3, 20, 20));
+            buttonPanel.setOpaque(false);
 
-            gbc.gridy++;
-            JButton instructionsButton = new JButton("Instructions");
-            instructionsButton.setFont(new Font("Arial", Font.PLAIN, 20));
-            instructionsButton.addActionListener(e -> JOptionPane.showMessageDialog(this,
-                    "Pour commencer une partie, cliquez sur 'Nouvelle Partie' et sélectionnez une image.\n" +
-                            "Reconstituez l'image en cliquant sur les tuiles adjacentes à la tuile vide.\n" +
-                            "Chaque niveau augmente la difficulté (plus de tuiles ou réinitialisation des tuiles).\n" +
-                            "Le but est de terminer les niveaux et d'obtenir le meilleur score !",
-                    "Instructions", JOptionPane.INFORMATION_MESSAGE));
-            add(instructionsButton, gbc);
+            newGameButton = createMenuButton("▶ Nouvelle Partie", e -> prepareGame());
+            buttonPanel.add(newGameButton);
+            
+            highScoresButton = createMenuButton("🏆 Meilleurs Scores", e -> {
+                highScorePanel.loadHighScores();
+                cardLayout.show(mainPanel, "HighScores");
+            });
+            buttonPanel.add(highScoresButton);
+            
+            quitButton = createMenuButton("❌ Quitter", e -> System.exit(0));
+            buttonPanel.add(quitButton);
+            
+            add(buttonPanel, gbc);
+            
+            animationTimer.start();
+        }
 
-            gbc.gridy++;
-            JButton exitButton = new JButton("Quitter");
-            exitButton.setFont(new Font("Arial", Font.PLAIN, 20));
-            exitButton.addActionListener(e -> exitGame());
-            add(exitButton, gbc);
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2d = (Graphics2D) g;
+            GradientPaint gp = new GradientPaint(
+                    0, 0, gradientStartColor,
+                    getWidth(), getHeight(), gradientEndColor);
+            g2d.setPaint(gp);
+            g2d.fillRect(0, 0, getWidth(), getHeight());
+        }
+
+        private JButton createMenuButton(String text, ActionListener listener) {
+            JButton button = new JButton(text);
+            button.setFont(FONT_BUTTON);
+            button.setBackground(COLOR_ACCENT);
+            button.setForeground(COLOR_FOREGROUND);
+            button.setFocusPainted(false);
+            button.setBorder(BorderFactory.createEmptyBorder(15, 30, 15, 30));
+            button.addActionListener(listener);
+            return button;
+        }
+
+        public void updateGreeting(String name) {
+            greetingLabel.setText(name.equals(DEFAULT_PLAYER_NAME) ? "Puzzle Prestige" : "Bon retour, " + name);
         }
     }
 
-    class PuzzlePanel extends JPanel {
+    /**
+     * PuzzlePanel --- The main game screen where the puzzle is solved.
+     * Contains the puzzle grid and game information like time and moves.
+     * <p>
+     * PuzzlePanel --- L'écran de jeu principal où le puzzle est résolu.
+     * Contient la grille et les informations de jeu comme le temps et les mouvements.
+     */
+    private class PuzzlePanel extends JPanel {
         private JButton[][] buttons;
-        private int emptyRow, emptyCol;
-        private int gridSize;
-        private JLabel scoreLabel;
-        private JLabel levelLabel;
+        private int emptyRow, emptyCol, gridSize;
+        private BufferedImage originalImage;
+        private Timer gameTimer;
+        private int timeElapsed = 0;
+        private int moveCount = 0;
+        private final JLabel timeLabel = createSideLabel("Temps: 0s");
+        private final JLabel moveCountLabel = createSideLabel("Mouvements: 0");
 
-        // Stocke l'ordre actuel des tuiles (indices des images dans tileImages)
-        private int[][] tileOrder;
-
+        // --- AJOUT : Variables pour l'animation de l'arrière-plan du jeu ---
+        private Timer backgroundAnimationTimer;
+        private float backgroundHue = 0.6f; // Teinte de départ (bleu/violet)
+        private Color gameGradientStart = new Color(25, 25, 80);
+        private Color gameGradientEnd = new Color(50, 25, 120);
 
         public PuzzlePanel() {
-            setLayout(new BorderLayout());
-            scoreLabel = new JLabel("Score: 0");
-            levelLabel = new JLabel("Niveau: 1");
+            setLayout(new BorderLayout(15, 15));
+            setBorder(new EmptyBorder(15, 15, 15, 15));
+            // Le setBackground est maintenant géré par paintComponent
+            
+            // --- AJOUT : Initialisation du Timer pour l'animation de fond ---
+            backgroundAnimationTimer = new Timer(50, e -> {
+                backgroundHue += 0.0005f;
+                if (backgroundHue > 1.0f) {
+                    backgroundHue = 0.0f;
+                }
+                // Crée des couleurs dans les tons bleus/violets qui varient lentement
+                gameGradientStart = Color.getHSBColor(backgroundHue, 0.7f, 0.4f);
+                gameGradientEnd = Color.getHSBColor(backgroundHue + 0.05f, 0.7f, 0.5f);
+                
+                // --- AJOUT : Adapte la couleur du texte pour la lisibilité ---
+                Color textColor = Color.getHSBColor(backgroundHue + 0.5f, 0.2f, 1.0f);
+                timeLabel.setForeground(textColor);
+                moveCountLabel.setForeground(textColor);
+                repaint();
+            });
+            backgroundAnimationTimer.start();
+        }
+        
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2d = (Graphics2D) g;
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            // --- MODIFICATION : Utilisation des couleurs animées pour le dégradé ---
+            GradientPaint gp = new GradientPaint(0, 0, gameGradientStart, getWidth(), getHeight(), gameGradientEnd);
+            g2d.setPaint(gp);
+            g2d.fillRect(0, 0, getWidth(), getHeight());
         }
 
-        public void startGame(int level) {
-            // Vérifier si une image a été chargée
-            if (originalImage == null || tileImages == null || tileImages.isEmpty()) {
-                JOptionPane.showMessageDialog(PuzzleGame.this,
-                        "Veuillez d'abord sélectionner une image via 'Nouvelle Partie' dans le menu principal.",
-                        "Image Manquante", JOptionPane.WARNING_MESSAGE);
-                showMainMenu(); // Retour au menu si pas d'image
-                return;
-            }
+        public void startGame(int gridSize, BufferedImage image) {
+            this.gridSize = gridSize;
+            this.originalImage = image;
+            this.removeAll(); 
 
-            this.gridSize = Math.min(level + 2, 5); // Grille de 3x3 à 5x5 max (pour level 3 et au-delà)
-            removeAll(); // Supprimer les anciens composants de la grille
-
-            setLayout(new BorderLayout());
-
-            JPanel infoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-            scoreLabel.setText("Score: " + currentScore);
-            scoreLabel.setFont(new Font("Arial", Font.BOLD, 18));
-            levelLabel.setText("Niveau: " + currentLevel);
-            levelLabel.setFont(new Font("Arial", Font.BOLD, 18));
-            infoPanel.add(scoreLabel);
-            infoPanel.add(Box.createHorizontalStrut(50));
-            infoPanel.add(levelLabel);
-
-            JButton quitButton = new JButton("Quitter la partie");
-            quitButton.addActionListener(e -> gameOver());
-            infoPanel.add(Box.createHorizontalStrut(50));
-            infoPanel.add(quitButton);
-            add(infoPanel, BorderLayout.NORTH);
-
-            JPanel puzzleGridPanel = new JPanel(new GridLayout(gridSize, gridSize));
-            buttons = new JButton[gridSize][gridSize];
-            tileOrder = new int[gridSize][gridSize]; // Nouvelle matrice pour l'ordre des tuiles
-
-            // Créer une liste d'indices de tuiles de 0 à (gridSize*gridSize - 2)
-            List<Integer> tileIndices = new ArrayList<>();
-            // Attention: tileImages contient gridSize*gridSize - 1 tuiles
-            // Donc les indices vont de 0 à (nombre de tuiles - 1)
-            for (int i = 0; i < tileImages.size(); i++) { // Utiliser tileImages.size() pour la bonne borne
-                tileIndices.add(i);
-            }
-            Collections.shuffle(tileIndices); // Mélanger les indices
-
-            int currentTileIndex = 0;
-            for (int i = 0; i < gridSize; i++) {
-                for (int j = 0; j < gridSize; j++) {
-                    if (i == gridSize - 1 && j == gridSize - 1) { // Dernière tuile est vide
-                        buttons[i][j] = new JButton();
-                        buttons[i][j].setPreferredSize(new Dimension(originalImage.getWidth() / gridSize, originalImage.getHeight() / gridSize)); // Taille pour les tuiles
-                        buttons[i][j].setBorder(BorderFactory.createLineBorder(Color.BLACK));
-                        emptyRow = i;
-                        emptyCol = j;
-                        tileOrder[i][j] = -1; // -1 pour la tuile vide
-                    } else {
-                        // S'assurer qu'on ne dépasse pas la taille de tileIndices
-                        if (currentTileIndex < tileIndices.size()) {
-                            int originalImageIndex = tileIndices.get(currentTileIndex++);
-                            buttons[i][j] = new JButton(new ImageIcon(tileImages.get(originalImageIndex)));
-                            buttons[i][j].setPreferredSize(new Dimension(originalImage.getWidth() / gridSize, originalImage.getHeight() / gridSize)); // Taille pour les tuiles
-                            buttons[i][j].setBorder(BorderFactory.createLineBorder(Color.BLACK));
-                            buttons[i][j].setFocusPainted(false); // Amélioration visuelle
-                            tileOrder[i][j] = originalImageIndex; // Stocke l'indice de l'image originale
-                        } else {
-                             // Ceci ne devrait pas arriver si le calcul de tileImages.size() est correct
-                             // Mais c'est une sécurité.
-                            buttons[i][j] = new JButton("?"); // Fallback pour tuile manquante
-                            buttons[i][j].setPreferredSize(new Dimension(originalImage.getWidth() / gridSize, originalImage.getHeight() / gridSize));
-                        }
-                    }
-                    buttons[i][j].addActionListener(new TileClickListener(i, j));
-                    puzzleGridPanel.add(buttons[i][j]);
-                }
-            }
-            add(puzzleGridPanel, BorderLayout.CENTER);
+            setupSidePanel();
+            setupGrid();
+            
             revalidate();
             repaint();
+            startTimer();
+        }
+
+        private void setupSidePanel() {
+            JPanel sidePanel = new JPanel();
+            sidePanel.setLayout(new BoxLayout(sidePanel, BoxLayout.Y_AXIS));
+            sidePanel.setOpaque(false);
+            sidePanel.setPreferredSize(new Dimension(250, 0));
+            
+            JLabel imagePreviewLabel = new JLabel();
+            imagePreviewLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+            imagePreviewLabel.setIcon(new ImageIcon(originalImage.getScaledInstance(220, 220, Image.SCALE_SMOOTH)));
+            imagePreviewLabel.setToolTipText("Cliquez pour agrandir");
+            imagePreviewLabel.addMouseListener(new MouseAdapter() {
+                public void mouseClicked(MouseEvent e) {
+                    JDialog previewDialog = new JDialog(PuzzleGame.this, "Aperçu de l'image", true);
+                    previewDialog.add(new JLabel(new ImageIcon(originalImage)));
+                    previewDialog.pack();
+                    previewDialog.setLocationRelativeTo(PuzzleGame.this);
+                    previewDialog.setVisible(true);
+                }
+            });
+            sidePanel.add(imagePreviewLabel);
+            sidePanel.add(Box.createRigidArea(new Dimension(0, 20)));
+
+            sidePanel.add(timeLabel);
+            sidePanel.add(moveCountLabel);
+            sidePanel.add(Box.createVerticalGlue());
+
+            JButton quitButton = new JButton("Retour au Menu");
+            quitButton.addActionListener(e -> showMainMenu());
+            quitButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+            sidePanel.add(quitButton);
+            
+            add(sidePanel, BorderLayout.EAST);
+        }
+
+        private void setupGrid() {
+            JPanel puzzleGridPanel = new JPanel(new GridLayout(gridSize, gridSize, 2, 2));
+            puzzleGridPanel.setOpaque(false);
+            buttons = new JButton[gridSize][gridSize];
+            
+            List<ImageIcon> tiles = createTiles();
+            List<Integer> tileIds = new ArrayList<>();
+            for(int i=0; i<tiles.size(); i++) tileIds.add(i);
+            Collections.shuffle(tileIds);
+
+            for (int i = 0; i < gridSize * gridSize; i++) {
+                int r = i / gridSize;
+                int c = i % gridSize;
+                
+                if (i == tiles.size() -1) {
+                    buttons[r][c] = new JButton();
+                    buttons[r][c].setOpaque(false);
+                    buttons[r][c].setContentAreaFilled(false);
+                    buttons[r][c].setBorderPainted(false);
+                    emptyRow = r;
+                    emptyCol = c;
+                } else {
+                    int tileId = tileIds.get(i);
+                    buttons[r][c] = new JButton(tiles.get(tileId));
+                    buttons[r][c].putClientProperty("tile_id", tileId);
+                    buttons[r][c].setBorder(null);
+                }
+                
+                buttons[r][c].setFocusPainted(false);
+                buttons[r][c].addActionListener(new TileClickListener(r, c));
+                puzzleGridPanel.add(buttons[r][c]);
+            }
+            add(puzzleGridPanel, BorderLayout.CENTER);
+        }
+        
+        private List<ImageIcon> createTiles() {
+            List<ImageIcon> tiles = new ArrayList<>();
+            int tileWidth = originalImage.getWidth() / gridSize;
+            int tileHeight = originalImage.getHeight() / gridSize;
+            for (int i = 0; i < gridSize * gridSize; i++) {
+                int r = i / gridSize;
+                int c = i % gridSize;
+                BufferedImage tileImage = originalImage.getSubimage(c * tileWidth, r * tileHeight, tileWidth, tileHeight);
+                tiles.add(new ImageIcon(tileImage));
+            }
+            return tiles;
+        }
+
+        private void startTimer() {
+            timeElapsed = 0;
+            moveCount = 0;
+            updateInfo();
+            if (gameTimer != null && gameTimer.isRunning()) gameTimer.stop();
+            gameTimer = new Timer(1000, e -> {
+                timeElapsed++;
+                updateInfo();
+            });
+            gameTimer.start();
+        }
+
+        private void updateInfo() {
+            timeLabel.setText(String.format("Temps: %ds", timeElapsed));
+            moveCountLabel.setText(String.format("Mouvements: %d", moveCount));
+        }
+
+        private JLabel createSideLabel(String text) {
+            JLabel label = new JLabel(text);
+            label.setFont(FONT_LABEL);
+            label.setForeground(COLOR_FOREGROUND);
+            label.setAlignmentX(Component.CENTER_ALIGNMENT);
+            label.setBorder(new EmptyBorder(10, 0, 10, 0));
+            return label;
+        }
+
+        private void checkWinCondition() {
+            boolean isWin = true;
+            for(int i = 0; i < gridSize * gridSize - 1; i++){
+                JButton button = buttons[i/gridSize][i%gridSize];
+                if(button.getIcon() == null || (int)button.getClientProperty("tile_id") != i){
+                    isWin = false;
+                    break;
+                }
+            }
+
+            if(isWin) {
+                gameTimer.stop();
+                buttons[emptyRow][emptyCol].setIcon(createTiles().get(gridSize*gridSize-1));
+
+                int finalScore = Math.max(0, 10000 - (timeElapsed * 10) - (moveCount * 5));
+                saveHighScore(currentPlayerName, finalScore);
+                JOptionPane.showMessageDialog(this, "Félicitations! Votre score: " + finalScore, "Puzzle Résolu!", JOptionPane.INFORMATION_MESSAGE);
+                showMainMenu();
+            }
         }
 
         private class TileClickListener implements ActionListener {
-            private int row, col;
-
-            public TileClickListener(int row, int col) {
-                this.row = row;
-                this.col = col;
-            }
+            private final int row, col;
+            public TileClickListener(int r, int c) { row = r; col = c; }
 
             @Override
             public void actionPerformed(ActionEvent e) {
-                // Mettre à jour les labels de score et de niveau avant de vérifier le déplacement
-                scoreLabel.setText("Score: " + currentScore);
-                levelLabel.setText("Niveau: " + currentLevel);
-
-                if ((Math.abs(row - emptyRow) == 1 && col == emptyCol) ||
-                        (Math.abs(col - emptyCol) == 1 && row == emptyRow)) {
-                    // Échanger les icônes des boutons
-                    Icon tempIcon = buttons[row][col].getIcon();
-                    buttons[emptyRow][emptyCol].setIcon(tempIcon);
-                    buttons[row][col].setIcon(null); // Rendre la tuile cliquée vide
-
-                    // Échanger les indices dans la matrice tileOrder
-                    int tempTileIndex = tileOrder[row][col];
-                    tileOrder[emptyRow][emptyCol] = tempTileIndex;
-                    tileOrder[row][col] = -1; // La nouvelle tuile vide a l'indice -1
+                if ((Math.abs(row - emptyRow) == 1 && col == emptyCol) || (Math.abs(col - emptyCol) == 1 && row == emptyRow)) {
+                    moveCount++;
+                    updateInfo();
+                    
+                    Icon clickedIcon = buttons[row][col].getIcon();
+                    Object clickedTileId = buttons[row][col].getClientProperty("tile_id");
+                    
+                    buttons[emptyRow][emptyCol].setIcon(clickedIcon);
+                    buttons[emptyRow][emptyCol].putClientProperty("tile_id", clickedTileId);
+                    
+                    buttons[row][col].setIcon(null);
+                    buttons[row][col].putClientProperty("tile_id", null);
 
                     emptyRow = row;
                     emptyCol = col;
-                    checkWin();
+                    checkWinCondition();
                 }
-            }
-        }
-
-        private void checkWin() {
-            boolean win = true;
-            int expectedIndex = 0;
-            for (int i = 0; i < gridSize; i++) {
-                for (int j = 0; j < gridSize; j++) {
-                    if (i == gridSize - 1 && j == gridSize - 1) {
-                        // La dernière tuile doit être la tuile vide (-1)
-                        if (tileOrder[i][j] != -1) {
-                            win = false;
-                            break;
-                        }
-                    } else {
-                        // Vérifier si l'indice de la tuile correspond à l'ordre attendu
-                        if (tileOrder[i][j] != expectedIndex) {
-                            win = false;
-                            break;
-                        }
-                    }
-                    expectedIndex++;
-                }
-                if (!win) break;
-            }
-
-            if (win) {
-                levelCompleted();
             }
         }
     }
 
-    class HighScorePanel extends JPanel {
-        private JTextArea scoreArea;
+    /**
+     * HighScorePanel --- Displays the list of top scores.
+     * Reads scores from a file and displays them in a sorted list.
+     * <p>
+     * HighScorePanel --- Affiche la liste des meilleurs scores.
+     * Lit les scores depuis un fichier et les affiche dans une liste triée.
+     */
+    private class HighScorePanel extends JPanel {
+        private final JTextArea scoreArea;
+        // --- AJOUT : Variables pour l'animation de l'arrière-plan des scores ---
+        private Timer scoreAnimationTimer;
+        private float scoreHue = 0.12f; // Teinte de départ dorée
+        private Color scoreCenterColor = new Color(255, 236, 179);
+        private Color scoreEdgeColor = new Color(205, 133, 63);
+        private JLabel titleLabel; // Rendu non-final pour changer sa couleur
 
         public HighScorePanel() {
-            setLayout(new BorderLayout());
-            JLabel titleLabel = new JLabel("Meilleurs Scores", SwingConstants.CENTER);
-            titleLabel.setFont(new Font("Arial", Font.BOLD, 24));
+            setLayout(new BorderLayout(10, 10));
+            setBorder(new EmptyBorder(20, 20, 20, 20));
+            
+            titleLabel = new JLabel("Meilleurs Scores", SwingConstants.CENTER);
+            titleLabel.setFont(new Font("Serif", Font.BOLD, 40));
             add(titleLabel, BorderLayout.NORTH);
 
             scoreArea = new JTextArea();
             scoreArea.setEditable(false);
-            scoreArea.setFont(new Font("Monospaced", Font.PLAIN, 16));
+            scoreArea.setFont(new Font("Monospaced", Font.PLAIN, 18));
+            scoreArea.setOpaque(false); 
+
             JScrollPane scrollPane = new JScrollPane(scoreArea);
+            scrollPane.setOpaque(false);
+            scrollPane.getViewport().setOpaque(false);
             add(scrollPane, BorderLayout.CENTER);
 
-            JButton backButton = new JButton("Retour au Menu Principal");
+            JButton backButton = new JButton("Retour au Menu");
             backButton.addActionListener(e -> showMainMenu());
             add(backButton, BorderLayout.SOUTH);
+
+            // --- AJOUT : Initialisation et démarrage du Timer pour l'animation ---
+            scoreAnimationTimer = new Timer(60, e -> {
+                scoreHue += 0.0008f;
+                if(scoreHue > 1.0f) scoreHue = 0.0f;
+                
+                // Maintient une animation dans les tons dorés
+                scoreCenterColor = Color.getHSBColor(0.12f, 0.3f, 1.0f - (float) (Math.sin(scoreHue * Math.PI * 2) * 0.1 + 0.1));
+                scoreEdgeColor = Color.getHSBColor(0.13f, 0.6f, 0.8f - (float) (Math.sin(scoreHue * Math.PI * 2) * 0.1 + 0.1));
+
+                // Adapte la couleur du texte pour un contraste optimal
+                Color textColor = Color.getHSBColor(0.1f, 0.9f, 0.3f + (float) (Math.sin(scoreHue * Math.PI * 2) * 0.1));
+                titleLabel.setForeground(textColor);
+                scoreArea.setForeground(textColor);
+                repaint();
+            });
+            scoreAnimationTimer.start();
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2d = (Graphics2D) g;
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            // --- MODIFICATION : Utilisation des couleurs animées pour le dégradé radial ---
+            Point2D center = new Point2D.Float(this.getWidth() / 2f, this.getHeight() / 2f);
+            float radius = Math.max(this.getWidth(), this.getHeight());
+            float[] dist = {0.0f, 1.0f};
+            Color[] colors = {scoreCenterColor, scoreEdgeColor};
+            RadialGradientPaint rgp = new RadialGradientPaint(center, radius, dist, colors);
+            g2d.setPaint(rgp);
+            g2d.fillRect(0, 0, getWidth(), getHeight());
         }
 
         public void loadHighScores() {
             List<ScoreEntry> scores = new ArrayList<>();
-            try (BufferedReader reader = new BufferedReader(new FileReader(HIGHSCORE_FILE))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    String[] parts = line.split(",");
-                    if (parts.length == 2) {
-                        try {
-                            String name = parts[0];
-                            int score = Integer.parseInt(parts[1]);
-                            scores.add(new ScoreEntry(name, score));
-                        } catch (NumberFormatException e) {
-                            System.err.println("Erreur de format de score dans le fichier: " + line);
+            File scoreFile = new File(HIGHSCORE_FILE);
+
+            if (scoreFile.exists()) {
+                try (BufferedReader reader = new BufferedReader(new FileReader(scoreFile))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String[] parts = line.split(",");
+                        if (parts.length == 2) {
+                            try {
+                                scores.add(new ScoreEntry(parts[0], Integer.parseInt(parts[1].trim())));
+                            } catch (NumberFormatException e) {
+                                System.err.println("Skipping malformed score line: " + line);
+                            }
                         }
                     }
+                } catch (IOException e) {
+                    System.err.println("Error reading high score file: " + e.getMessage());
                 }
-            } catch (IOException e) {
-                System.err.println("Fichier de highscores non trouvé ou erreur de lecture: " + HIGHSCORE_FILE + " (" + e.getMessage() + ")");
-                scoreArea.setText("Aucun score enregistré pour le moment.");
-                return;
             }
-
-            Collections.sort(scores, Comparator.comparingInt(ScoreEntry::getScore).reversed());
+            
+            scores.sort(Comparator.comparingInt(ScoreEntry::getScore).reversed());
 
             StringBuilder sb = new StringBuilder();
-            sb.append(String.format("%-20s %s\n", "Pseudo", "Score"));
-            sb.append("------------------------------\n");
-            int count = 0;
-            for (ScoreEntry entry : scores) {
-                if (count >= 10) break; // Afficher seulement les 10 meilleurs
-                sb.append(String.format("%-20s %d\n", entry.getName(), entry.getScore()));
-                count++;
-            }
-            scoreArea.setText(sb.toString());
-            if (scores.isEmpty()) {
-                scoreArea.setText("Aucun score enregistré pour le moment.");
-            }
+            sb.append(String.format("%-25s %s\n", "Pseudo", "Score"));
+            sb.append("------------------------------------\n");
+            
+            scores.stream().limit(10).forEach(entry -> 
+                sb.append(String.format("%-25s %d\n", entry.getName(), entry.getScore()))
+            );
+
+            scoreArea.setText(scores.isEmpty() ? "\n   Aucun score enregistré." : sb.toString());
         }
-
-        private class ScoreEntry {
-            private String name;
-            private int score;
-
-            public ScoreEntry(String name, int score) {
-                this.name = name;
-                this.score = score;
-            }
-
-            public String getName() {
-                return name;
-            }
-
-            public int getScore() {
-                return score;
-            }
+        
+        private static class ScoreEntry {
+            private final String name;
+            private final int score;
+            public ScoreEntry(String name, int score) { this.name = name; this.score = score; }
+            public String getName() { return name; }
+            public int getScore() { return score; }
         }
     }
 
+    /**
+     * The main entry point of the application.
+     * Le point d'entrée principal de l'application.
+     *
+     * @param args Command line arguments (not used).
+     * Arguments de la ligne de commande (non utilisés).
+     */
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> {
-            new PuzzleGame().setVisible(true);
-        });
+        // Ensure the UI is created on the Event Dispatch Thread for thread safety.
+        // S'assurer que l'UI est créée sur l'Event Dispatch Thread pour la sécurité des threads.
+        SwingUtilities.invokeLater(() -> new PuzzleGame().setVisible(true));
     }
 }
